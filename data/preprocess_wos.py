@@ -10,7 +10,7 @@ import re
 WoS Reference: https://github.com/kk7nc/HDLTex
 """
 
-FILE_DIR = './WOS/WebOfScience/Meta-data/Data.txt'
+FILE_DIR = './datasets/WOS/Data.txt'
 total_len = []
 np.random.seed(7)
 
@@ -157,7 +157,8 @@ def get_hierarchy():
     for line in data:
         line = line.rstrip('\n')
         line = json.loads(line)
-        line = line['doc_label']
+        key_label = "doc_label" if "doc_label" in line else "label"
+        line = line[key_label]
         if line[0] in label_hierarchy:
             if line[1] not in label_hierarchy[line[0]]:
                 label_hierarchy[line[0]].append(line[1])

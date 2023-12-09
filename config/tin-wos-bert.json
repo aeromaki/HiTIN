@@ -1,7 +1,7 @@
 {
   "data": {
     "dataset": "wos",
-    "data_dir": "YOUR_DATA_DIR",
+    "data_dir": "data",
     "train_file": "wos_train.json",
     "val_file": "wos_val.json",
     "test_file": "wos_test.json",
@@ -18,7 +18,7 @@
     "token": {
       "dimension": 300,
       "type": "pretrain",
-      "pretrained_file": "YOUR_DATA_DIR/glove.6B.300d.txt",
+      "pretrained_file": "data/datasets/glove.6B.300d.txt",
       "dropout": 0.5,
       "init_type": "kaiming_uniform"
     },
@@ -31,7 +31,7 @@
   },
   "text_encoder": {
     "type": "bert",
-    "bert_model_dir": "YOUR_BERT_DIR",
+    "bert_model_dir": "bert-base-uncased",
     "max_length": 300,
     "RNN": {
       "bidirectional": true,

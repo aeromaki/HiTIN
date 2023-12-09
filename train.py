@@ -22,6 +22,8 @@ from transformers import BertTokenizer
 from helper.lr_schedulers import get_linear_schedule_with_warmup
 from helper.adamw import AdamW
 
+from tqdm import tqdm
+
 warnings.filterwarnings("ignore")
 
 
@@ -45,6 +47,9 @@ def train(config, args):
     """
     :param config: helper.configure, Configure Object
     """
+
+    print("\nlet's go\n")
+
     # loading corpus and generate vocabulary
     corpus_vocab = Vocab(config,
                          min_freq=5,
@@ -54,13 +59,18 @@ def train(config, args):
     else:
         tokenizer = None
 
+    print("\nvocab ready\n")
+
     # get data
     train_loader, dev_loader, test_loader = data_loaders(config, corpus_vocab, tokenizer=tokenizer)
 
+    print("\ndataloader ready\n")
+
     # build up model
     hiagm = HiAGM(config, corpus_vocab, model_type=config.model.type, model_mode='TRAIN')
-
     hiagm.to(config.train.device_setting.device)
+
+    print("\nmodel declared\n")
 
     # Code for counting parameters
     # from thop import clever_format
@@ -81,6 +91,9 @@ def train(config, args):
                                    # recursive_penalty=config.train.loss.recursive_regularization.penalty,
                                    recursive_penalty=args.hierar_penalty,  # using args
                                    recursive_constraint=config.train.loss.recursive_regularization.flag)
+
+    print("\nloss ready\n")
+
     if config.text_encoder.type == "bert":
         t_total = int(len(train_loader) * (config.train.end_epoch-config.train.start_epoch))
 
@@ -104,6 +117,8 @@ def train(config, args):
         optimizer = set_optimizer(config, hiagm)
         scheduler = None
 
+    print("\noptimizer ready\n")
+
     # get epoch trainer
     trainer = Trainer(model=hiagm,
                       criterion=criterion,
@@ -112,6 +127,8 @@ def train(config, args):
                       vocab=corpus_vocab,
                       config=config)
 
+    print("\ntrainer ready\n")
+
     # set origin log
     best_epoch = [-1, -1]
     best_performance = [0.0, 0.0]
@@ -119,10 +136,12 @@ def train(config, args):
         ckpt_dir
             begin-time_dataset_model
                 best_micro/macro-model_type-training_params_(tin_params)
-                                            
     '''
     # model_checkpoint = config.train.checkpoint.dir
     model_checkpoint = os.path.join(args.ckpt_dir, args.begin_time + config.train.checkpoint.dir)  # using args
+
+    print(f"\n model_checkpoint: {model_checkpoint}\n")
+
     model_name = config.model.type
     if config.structure_encoder.type == "TIN":
         model_name += '_' + str(args.tree_depth) + '_' + str(args.hidden_dim) + '_' + args.tree_pooling_type + '_' + str(args.final_dropout) + '_' + str(args.hierar_penalty)
@@ -151,52 +170,64 @@ def train(config, args):
             logger.info('Previous Best Performance---- Micro-F1: {}%, Macro-F1: {}%'.format(
                 best_performance[0], best_performance[1]))
 
-    for epoch in range(config.train.start_epoch, config.train.end_epoch):
+    print("\nmodel loaded (if set)\n")
+
+    N_EVAL = 10
+    do_eval = lambda i: (i+1)%N_EVAL==0
+
+    for i, epoch in enumerate(tqdm(range(config.train.start_epoch, config.train.end_epoch))):
         start_time = time.time()
+
+        print(f"train start in epoch {epoch}\n")
         trainer.train(train_loader, epoch)
-        trainer.eval(train_loader, epoch, 'TRAIN')
-        performance = trainer.eval(dev_loader, epoch, 'DEV')
 
-        # record results for each epoch
-        print("[Val] epoch: %d precision: %.4f\t recall: %.4f\t micro_f1: %.4f\t macro_f1: %.4f" \
-                    % (epoch, performance['precision'], performance['recall'], performance['micro_f1'], performance['macro_f1']))
-        # saving best model and check model
-        if not (performance['micro_f1'] >= best_performance[0] or performance['macro_f1'] >= best_performance[1]):
-            wait += 1
-            # reduce LR on plateau
-            if wait % config.train.optimizer.lr_patience == 0:
-                logger.warning("Performance has not been improved for {} epochs, updating learning rate".format(wait))
-                trainer.update_lr()
-            # early stopping
-            if wait == config.train.optimizer.early_stopping:
-                logger.warning("Performance has not been improved for {} epochs, stopping train with early stopping"
-                               .format(wait))
-                break
+        if do_eval(i):
+            print(f"eval start in epoch {epoch}\n")
+            trainer.eval(train_loader, epoch, 'TRAIN')
+            performance = trainer.eval(dev_loader, epoch, 'DEV')
 
-        if performance['micro_f1'] > best_performance[0]:
-            wait = 0
-            logger.info('Improve Micro-F1 {}% --> {}%'.format(best_performance[0], performance['micro_f1']))
-            best_performance[0] = performance['micro_f1']
-            best_epoch[0] = epoch
-            save_checkpoint({
-                'epoch': epoch,
-                'model_type': config.model.type,
-                'state_dict': hiagm.state_dict(),
-                'best_performance': best_performance,
-                'optimizer': optimizer.state_dict()
-            }, os.path.join(model_checkpoint, 'best_micro_' + model_name))
-        if performance['macro_f1'] > best_performance[1]:
-            wait = 0
-            logger.info('Improve Macro-F1 {}% --> {}%'.format(best_performance[1], performance['macro_f1']))
-            best_performance[1] = performance['macro_f1']
-            best_epoch[1] = epoch
-            save_checkpoint({
-                'epoch': epoch,
-                'model_type': config.model.type,
-                'state_dict': hiagm.state_dict(),
-                'best_performance': best_performance,
-                'optimizer': optimizer.state_dict()
-            }, os.path.join(model_checkpoint, 'best_macro_' + model_name))
+            # record results for each epoch
+            print("[Val] epoch: %d precision: %.4f\t recall: %.4f\t micro_f1: %.4f\t macro_f1: %.4f" \
+                        % (epoch, performance['precision'], performance['recall'], performance['micro_f1'], performance['macro_f1']))
+            # saving best model and check model
+            if not (performance['micro_f1'] >= best_performance[0] or performance['macro_f1'] >= best_performance[1]):
+                wait += 1
+                # reduce LR on plateau
+                if wait % config.train.optimizer.lr_patience == 0:
+                    logger.warning("Performance has not been improved for {} epochs, updating learning rate".format(wait))
+                    trainer.update_lr()
+                # early stopping
+                if wait == config.train.optimizer.early_stopping:
+                    logger.warning("Performance has not been improved for {} epochs, stopping train with early stopping"
+                                .format(wait))
+                    break
+
+            if performance['micro_f1'] > best_performance[0]:
+                wait = 0
+                logger.info('Improve Micro-F1 {}% --> {}%'.format(best_performance[0], performance['micro_f1']))
+                best_performance[0] = performance['micro_f1']
+                best_epoch[0] = epoch
+                save_checkpoint({
+                    'epoch': epoch,
+                    'model_type': config.model.type,
+                    'state_dict': hiagm.state_dict(),
+                    'best_performance': best_performance,
+                    'optimizer': optimizer.state_dict()
+                }, os.path.join(model_checkpoint, 'best_micro_' + model_name))
+                print(f"model saved - micro_f1: {best_performance}")
+            if performance['macro_f1'] > best_performance[1]:
+                wait = 0
+                logger.info('Improve Macro-F1 {}% --> {}%'.format(best_performance[1], performance['macro_f1']))
+                best_performance[1] = performance['macro_f1']
+                best_epoch[1] = epoch
+                save_checkpoint({
+                    'epoch': epoch,
+                    'model_type': config.model.type,
+                    'state_dict': hiagm.state_dict(),
+                    'best_performance': best_performance,
+                    'optimizer': optimizer.state_dict()
+                }, os.path.join(model_checkpoint, 'best_macro_' + model_name))
+                print(f"model saved - macro_f1: {best_performance}")
 
         # if epoch % 10 == 1:
         #     save_checkpoint({
